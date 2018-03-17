@@ -2,5 +2,8 @@
   "private": true,
   "scripts": {
     "test": "node test.js"
+  },
+  "devDependencies": {
+    "debug": "^3.1.0"
   }
 }

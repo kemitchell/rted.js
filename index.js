@@ -1,14 +1,20 @@
 var assert = require('assert')
+var debug = require('debug')('rted')
 
-exports.rightmostRoot = function (argument) {
-  return argument.nodes
-    .reverse()
-    .find(function (node) { return isRoot(argument, node) })
+exports.rightmostRoot = function (graph) {
+  var nodes = graph.nodes
+  for (var index = graph.nodes.length - 1; index > -1; index--) {
+    var node = nodes[index]
+    if (isRoot(graph, node)) return node
+  }
 }
 
-exports.leftmostRoot = function (argument) {
-  return argument.nodes
-    .find(function (node) { return isRoot(argument, node) })
+exports.leftmostRoot = function (graph) {
+  var nodes = graph.nodes
+  for (var index = 0; index < nodes.length; index++) {
+    var node = nodes[index]
+    if (isRoot(graph, node)) return node
+  }
 }
 
 function isRoot (context, node) {
@@ -17,47 +23,74 @@ function isRoot (context, node) {
   })
 }
 
-exports.recursive = function (costs, direction) {
-  assert(costs)
+var EMPTY = {nodes: [], edges: []}
+
+function isEmpty (graph) {
+  return graph.nodes.length === 0
+}
+
+exports.recursive = function (costs, traverse) {
+  assert.equal(typeof costs, 'object')
   assert.equal(typeof costs.insert, 'function')
   assert.equal(typeof costs.delete, 'function')
   assert.equal(typeof costs.rename, 'function')
   assert(
-    direction === exports.rightmostRoot ||
-    direction === exports.leftmostRoot
+    traverse === exports.rightmostRoot ||
+    traverse === exports.leftmostRoot
   )
   return function distance (f, g) {
-    assert(isAGraph(f))
-    assert(isAGraph(g))
+    assert(isAGraph(f), 'first argument not a graph')
+    assert(isAGraph(g), 'second argument not a graph')
     var v, w
 
-    if (empty(f) && empty(g)) {
+    // δ(∅, ∅) = 0
+    if (isEmpty(f) && isEmpty(g)) {
+      debug('both empty')
       return 0
-    } else if (empty(g)) {
-      v = direction(f)
-      return distance(withoutNode(f, v), g) + costs.delete(v)
-    } else if (empty(f)) {
-      w = direction(g)
-      return distance(f, withoutNode(g, w)) + costs.insert(w)
+    // δ(F, ∅) = δ(F − v, ∅) + cd(v)
+    } else if (isEmpty(g)) {
+      debug('g is empty')
+      v = traverse(f)
+      return distance(minus(f, v), EMPTY) + costs.delete(v)
+    // δ(∅, G) = δ(∅, G − w) + ci(w)
+    } else if (isEmpty(f)) {
+      debug('f is empty')
+      w = traverse(g)
+      return distance(EMPTY, minus(g, w)) + costs.insert(w)
     } else {
+      // if F is not a tree or G is not a tree:
       if (!isATree(f) || !isATree(g)) {
-        v = direction(f)
-        w = direction(g)
+        debug('one tree')
+        v = traverse(f)
+        w = traverse(g)
+        // δ(F, G) = min ...
         return Math.min(
-          distance(withoutNode(f, v), g) + costs.delete(v),
-          distance(f, withoutNode(g, w)) + costs.insert(w),
-          distance(
-            withoutSubtree(f, subtree(f, v)),
-            withoutSubtree(g, subtree(g, w))
+          // δ(F − v, G) + cd(v)
+          distance(minus(f, v), g) + costs.delete(v),
+          // δ(F, G − w) + ci(w)
+          distance(f, minus(g, w)) + costs.insert(w),
+          // δ(Fv, Gw) + δ(F − Fv, G − Gw)
+          (
+            distance(subtree(f, v), subtree(g, w)) +
+            distance(
+              minus(f, subtree(f, v)),
+              minus(g, subtree(g, w))
+            )
           )
         )
+      // if F is a tree and G is a tree:
       } else {
-        v = direction(f)
-        w = direction(g)
+        debug('both trees')
+        v = traverse(f)
+        w = traverse(g)
+        // δ(F, G) = min ...
         return Math.min(
-          distance(withoutNode(f, v), g) + costs.delete(v),
-          distance(f, withoutNode(g, w)) + costs.insert(w),
-          distance(withoutNode(f, v), withoutNode(g, w)) + costs.rename(v, w)
+          // δ(F − v, G) + cd(v)
+          distance(minus(f, v), g) + costs.delete(v),
+          // δ(F, G − w) + ci(w)
+          distance(f, minus(g, w)) + costs.insert(w),
+          // δ(F − v, G − w) + cr(v, w)
+          distance(minus(f, v), minus(g, w)) + costs.rename(v, w)
         )
       }
     }
@@ -116,29 +149,31 @@ function descendantsOf (graph, node) {
   return returned
 }
 
-exports.withoutNode = withoutNode
+exports.minus = minus
 
-function withoutNode (graph, node) {
+function minus (graph, removing) {
+  if (isAGraph(removing)) return minusSubtree(graph, removing)
+  else return minusNode(graph, removing)
+}
+
+function minusNode (graph, removing) {
   return {
     nodes: graph.nodes.filter(function (otherNode) {
-      return otherNode !== node
+      return otherNode !== removing
     }),
     edges: graph.edges.filter(function (edge) {
-      return edge.parent !== node && edge.child !== node
+      return edge.parent !== removing && edge.child !== removing
     })
   }
 }
 
-exports.withoutSubtree = withoutSubtree
-
-function withoutSubtree (graph, subtree) {
-  return subtree.nodes.reduce(function (graph, node) {
-    return withoutNode(graph, node)
-  }, graph)
-}
-
-function empty (graph) {
-  return graph.nodes.length === 0
+function minusSubtree (graph, subtree) {
+  var nodes = subtree.nodes
+  for (var index = 0; index < nodes.length; index++) {
+    var node = nodes[index]
+    graph = minus(graph, node)
+  }
+  return graph
 }
 
 function isATree (graph) {
